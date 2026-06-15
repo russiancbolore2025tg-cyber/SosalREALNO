@@ -28,12 +28,19 @@ jobs:
         with:
           ndk-version: r25c
 
-      - name: Download Static Git and SSH Binaries for Android ARM64
+      - name: Download Static Git and SSH for Android ARM64
         run: |
           mkdir -p payload/bin
-          # Загрузка стабильных статических бинарников git и ssh для архитектуры aarch64
-          wget -q -O payload/bin/git https://github.com/joshua-noakes/static-binaries/raw/main/git-arm64
-          wget -q -O payload/bin/ssh https://github.com/joshua-noakes/static-binaries/raw/main/ssh-arm64
+          # Использование проверенных статических сборников под архитектуру aarch64 (Bionic/Android)
+          wget -q -O payload/bin/git "https://github.com/Bionicveka/git-static-android/releases/download/v2.40.1/git-2.40.1-arm64.tar.gz"
+          tar -xzf payload/bin/git -C payload/bin/
+          # Удаление архива и переименование бинарника, если необходимо
+          find payload/bin/ -type f -name "git-*" -exec mv {} payload/bin/git \;
+          rm -f payload/bin/*.tar.gz
+          
+          # Загрузка статического SSH-клиента
+          wget -q -O payload/bin/ssh "https://github.com/vst93/static-binaries-android/raw/master/arm64-v8a/ssh"
+          
           chmod +x payload/bin/git
           chmod +x payload/bin/ssh
 
@@ -44,12 +51,32 @@ jobs:
           mv temp_heroku/* payload/heroku_app/
           rm -rf temp_heroku
 
+      - name: Direct Patching of Telegram Session Parameters (Anti-Ban)
+        run: |
+          # Патчинг исходного кода Heroku прямо на этапе компиляции
+          python3 -c '
+          import os
+          
+          main_py_path = "payload/heroku_app/heroku/main.py"
+          if os.path.exists(main_py_path):
+              with open(main_py_path, "r", encoding="utf-8") as f:
+                  code = f.read()
+              
+              # Замена динамических генераторов девайсов на безопасные статические параметры
+              code = code.replace("device_model=get_app_name(),", "device_model=\"Pixel 8 Pro\",")
+              code = code.replace("system_version=generate_random_system_version(),", "system_version=\"Android 14\",")
+              code = code.replace("app_version=\".\".join(map(str, list(__version__))) + \" x64\",", "app_version=\"12.5.1\",")
+              
+              with open(main_py_path, "w", encoding="utf-8") as f:
+                  f.write(code)
+              print("main.py successfully patched.")
+          '
+
       - name: Download and Unpack Compiled Python Wheels (Android ARM64 / cp311)
         run: |
           mkdir -p wheels
           mkdir -p payload/site-packages
           
-          # Запись всех зависимостей во временный файл
           cat << 'EOF' > temp_requirements.txt
           heroku-tl-new==2.0.0
           pyaes
@@ -78,7 +105,6 @@ jobs:
           Pillow
           EOF
 
-          # Скачивание предкомпилированных под Android ARM64 Python 3.11 whl-пакетов
           pip download \
             --only-binary=:all: \
             --platform android_32_arm64_v8a \
@@ -88,7 +114,6 @@ jobs:
             -r temp_requirements.txt \
             -d wheels/
 
-          # Распаковка всех .whl пакетов прямо в site-packages будущего бандла
           for whl in wheels/*.whl; do
             unzip -q -o "$whl" -d payload/site-packages/
           done
@@ -103,7 +128,6 @@ jobs:
 
       - name: Generate C Payload Header
         run: |
-          # Конвертация ZIP-архива в массив байтов на C с помощью Python для кроссплатформенности
           python3 -c '
           import os
           with open("payload.zip", "rb") as f:
@@ -152,7 +176,6 @@ jobs:
 
       - name: Compile Unified Shared Library using NDK Clang
         run: |
-          # Использование тулчейна NDK для сборки под архитектуру Android aarch64 (API 32)
           $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android32-clang \
             -shared \
             -O3 \
