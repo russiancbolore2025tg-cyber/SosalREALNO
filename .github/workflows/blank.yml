@@ -87,13 +87,14 @@ jobs:
           os.makedirs("wheels_pure", exist_ok=True)
           os.makedirs("payload/site-packages", exist_ok=True)
 
-          # Разделение зависимостей на бинарные и чистые Python-пакеты
+          # Разделение зависимостей на бинарные и чистые Python-пакеты.
+          # TgCrypto-pyроfork заменен на стабильный tgcrypto из индекса Chaquopy.
           binary_reqs = [
-              "pydantic-core>=2.27.2",
+              "pydantic-core>=2.10.0",
               "orjson",
               "psutil==6.0.0",
               "Pillow",
-              "TgCrypto-pyrofork"
+              "tgcrypto"
           ]
 
           pure_reqs = [
@@ -125,20 +126,21 @@ jobs:
           with open("reqs_pure.txt", "w") as f:
               f.write("\n".join(pure_reqs))
 
-          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64
-          print("Downloading compiled binary wheels for Android ARM64...")
+          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64 из репозитория Chaquopy
+          print("Downloading compiled binary wheels for Android ARM64 from Chaquopy...")
           subprocess.run([
               "pip", "download",
               "--only-binary=:all:",
-              "--platform", "android_32_arm64_v8a",
+              "--platform", "android_21_arm64_v8a",
               "--implementation", "cp",
               "--python-version", "311",
               "--abi", "cp311",
+              "--index-url", "https://chaquo.com/pypi-7.0/",
               "-r", "reqs_binary.txt",
               "-d", "wheels_binary"
           ], check=True)
 
-          # 2. Загрузка чистых (платформонезависимых) Python-пакетов
+          # 2. Загрузка чистых (платформонезависимых) Python-пакетов из стандартного PyPI
           print("Downloading pure Python wheels/tarballs...")
           subprocess.run([
               "pip", "download",
