@@ -28,11 +28,11 @@ jobs:
         with:
           ndk-version: r25c
 
-      - name: Download Static Git and SSH for Android ARM64 with Failover
+      - name: Download Static Git for Android ARM64 with Failover
         run: |
           mkdir -p payload/bin
 
-          # Функция скачивания с перебором зеркал через curl (без уязвимого --spider HEAD)
+          # Функция скачивания с перебором зеркал через curl
           download_file() {
               local output_path="$1"
               shift
@@ -40,8 +40,8 @@ jobs:
               
               for url in "${urls[@]}"; do
                   echo "Attempting to download from: $url"
-                  # -f заставляет curl вернуть ошибку при 404/500
-                  # -L принудительно следует за редиректами на AWS S3
+                  # -f возвращает ошибку при статус-кодах 404/500
+                  # -L следует за редиректами
                   if curl -s -L -f -o "$output_path" "$url"; then
                       if [ -s "$output_path" ]; then
                           echo "Successfully downloaded to $output_path"
@@ -54,37 +54,22 @@ jobs:
               return 1
           }
 
-          # Список высоконадежных зеркал для Git (Android ARM64)
+          # Зеркала для скачивания статического Git под архитектуру Android ARM64 (arm64-v8a)
           git_mirrors=(
-              "https://github.com/romkatv/git-binaries/releases/download/v2.24.1.20191211/git-2.24.1.20191211-linux-aarch64.tar.gz"
-              "https://github.com/bionicveka/git-static-android/releases/download/v2.40.1/git-2.40.1-arm64.tar.gz"
-              "https://raw.githubusercontent.com/fabi9432/git-static-android/master/bin/git"
+              "https://github.com/EXALAB/git-static/raw/master/bin/arm64-v8a/git"
+              "https://raw.githubusercontent.com/EXALAB/git-static/master/bin/arm64-v8a/git"
           )
 
-          # Список высоконадежных зеркал для SSH (Android ARM64)
-          ssh_mirrors=(
-              "https://raw.githubusercontent.com/vst93/static-binaries-android/master/arm64-v8a/ssh"
-              "https://raw.githubusercontent.com/vst93/static-binaries-android/main/arm64-v8a/ssh"
-              "https://github.com/SirenR/static-binaries/raw/main/ssh-arm64"
-              "https://raw.githubusercontent.com/andrew-d/static-binaries/master/binaries/linux/arm64/ssh"
-          )
-
-          # Скачивание и извлечение Git
+          # Скачивание и верификация исполняемого файла Git
           if download_file "payload/bin/git_tmp" "${git_mirrors[@]}"; then
               if file payload/bin/git_tmp | grep -q "gzip"; then
-                  echo "Downloaded Git is a compressed archive. Extracting..."
+                  echo "Downloaded file is a compressed archive. Extracting..."
                   tar -xzf payload/bin/git_tmp -C payload/bin/
-                  
-                  # Поиск исполняемого файла git внутри распакованной структуры
                   find payload/bin/ -type f -name "git" -exec mv {} payload/bin/git_bin \;
-                  if [ ! -f "payload/bin/git_bin" ]; then
-                      find payload/bin/ -type f -name "git-*" -exec mv {} payload/bin/git_bin \;
-                  fi
-                  
                   mv payload/bin/git_bin payload/bin/git
                   rm -f payload/bin/git_tmp
               else
-                  echo "Downloaded Git is a direct raw binary."
+                  echo "Downloaded file is a direct binary."
                   mv payload/bin/git_tmp payload/bin/git
               fi
           else
@@ -92,17 +77,8 @@ jobs:
               exit 1
           fi
 
-          # Скачивание SSH
-          if download_file "payload/bin/ssh" "${ssh_mirrors[@]}"; then
-              echo "SSH binary downloaded successfully."
-          else
-              echo "Critical: SSH binary download failed."
-              exit 1
-          fi
-
-          # Установка прав на запуск
+          # Выдача прав на исполнение бинарного файла Git
           chmod +x payload/bin/git
-          chmod +x payload/bin/ssh
 
       - name: Clone Heroku Userbot Source
         run: |
@@ -113,7 +89,7 @@ jobs:
 
       - name: Direct Patching of Telegram Session Parameters (Anti-Ban)
         run: |
-          # Внесение изменений в исходный код Heroku до упаковки в SO
+          # Внесение изменений в параметры сессии Telethon до компиляции SO
           python3 -c '
           import os
           
@@ -122,7 +98,7 @@ jobs:
               with open(main_py_path, "r", encoding="utf-8") as f:
                   code = f.read()
               
-              # Замена динамических генераторов девайсов на безопасные статические параметры
+              # Принудительная замена параметров девайса на безопасные
               code = code.replace("device_model=get_app_name(),", "device_model=\"Pixel 8 Pro\",")
               code = code.replace("system_version=generate_random_system_version(),", "system_version=\"Android 14\",")
               code = code.replace("app_version=\".\".join(map(str, list(__version__))) + \" x64\",", "app_version=\"12.5.1\",")
