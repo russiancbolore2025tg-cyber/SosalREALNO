@@ -21,6 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y zip unzip curl clang file
+          pip install wheel setuptools
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -73,6 +74,29 @@ jobs:
               print("main.py successfully patched.")
           '
 
+      - name: Compile TgCrypto-pyrofork for Android ARM64
+        run: |
+          mkdir -p wheels_binary
+          mkdir -p temp_src
+
+          echo "Downloading TgCrypto-pyrofork source code..."
+          pip download TgCrypto-pyrofork --no-binary=:all: --no-deps -d temp_src
+          tar -xzf temp_src/TgCrypto-pyrofork-*.tar.gz -C temp_src/
+
+          # Экспорт путей компилятора Android NDK
+          export CC=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android31-clang
+          export CFLAGS="-target aarch64-linux-android31 -I$pythonLocation/include/python3.11"
+          export LDFLAGS="-target aarch64-linux-android31 -L$pythonLocation/lib"
+
+          echo "Compiling C-extensions of TgCrypto-pyrofork for Android ARM64..."
+          cd temp_src/TgCrypto-pyrofork-*
+          python setup.py bdist_wheel --plat-name=android_21_arm64_v8a
+          
+          # Перенос скомпилированного .whл в папку бинарных колес
+          mv dist/*.whl ../../wheels_binary/
+          cd ../..
+          rm -rf temp_src
+
       - name: Download and Extract All Python Dependencies (Pure & Binary)
         run: |
           python3 -c '
@@ -82,19 +106,18 @@ jobs:
           import tarfile
           import glob
 
-          # Создание необходимых папок
+          # Создание папок
           os.makedirs("wheels_binary", exist_ok=True)
           os.makedirs("wheels_pure", exist_ok=True)
           os.makedirs("payload/site-packages", exist_ok=True)
 
-          # Разделение зависимостей на бинарные и чистые Python-пакеты.
-          # TgCrypto-pyроfork заменен на стабильный tgcrypto из индекса Chaquopy 13.1.
+          # Пакет TgCrypto-pyrofork мы скомпилировали на предыдущем шаге,
+          # остальные бинарники берем из индекса Chaquopy 16.0
           binary_reqs = [
               "pydantic-core>=2.10.0",
               "orjson",
               "psutil==6.0.0",
-              "Pillow",
-              "tgcrypto"
+              "Pillow"
           ]
 
           pure_reqs = [
@@ -126,8 +149,8 @@ jobs:
           with open("reqs_pure.txt", "w") as f:
               f.write("\n".join(pure_reqs))
 
-          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64 из репозитория Chaquopy 13.1
-          print("Downloading compiled binary wheels for Android ARM64 from Chaquopy 13.1...")
+          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64 из репозитория Chaquopy 16.0
+          print("Downloading compiled binary wheels for Android ARM64 from Chaquopy 16.0...")
           subprocess.run([
               "pip", "download",
               "--only-binary=:all:",
@@ -135,7 +158,7 @@ jobs:
               "--implementation", "cp",
               "--python-version", "311",
               "--abi", "cp311",
-              "--index-url", "https://chaquo.com/pypi-13.1/",
+              "--index-url", "https://chaquo.com/pypi-16.0/",
               "-r", "reqs_binary.txt",
               "-d", "wheels_binary"
           ], check=True)
@@ -157,7 +180,7 @@ jobs:
                   with tarfile.open(filepath, "r:gz") as t:
                       t.extractall(dest)
 
-          print("Extracting compiled binary packages...")
+          print("Extracting compiled binary packages (including our custom built TgCrypto-pyrofork)...")
           for f in glob.glob("wheels_binary/*"):
               extract_archive(f, "payload/site-packages")
 
