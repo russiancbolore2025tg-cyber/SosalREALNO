@@ -28,52 +28,37 @@ jobs:
         with:
           ndk-version: r25c
 
-      - name: Download Static Git for Android ARM64 with Failover
+      - name: Download Static Git for Android ARM64 via GitHub API
         run: |
           mkdir -p payload/bin
 
-          # Функция скачивания с перебором зеркал через curl
-          download_file() {
-              local output_path="$1"
-              shift
-              local urls=("$@")
-              
-              for url in "${urls[@]}"; do
-                  echo "Attempting to download from: $url"
-                  # -f возвращает ошибку при статус-кодах 404/500
-                  # -L следует за редиректами
-                  if curl -s -L -f -o "$output_path" "$url"; then
-                      if [ -s "$output_path" ]; then
-                          echo "Successfully downloaded to $output_path"
-                          return 0
-                      fi
+          # Динамический запрос к GitHub API для получения прямой ссылки на ARM64 бинарник
+          echo "Querying GitHub API for EXALAB/git-static releases..."
+          ASSET_URL=$(curl -s https://api.github.com/repos/EXALAB/git-static/releases | grep -oP '"browser_download_url": "\K[^"]*' | grep -E "arm64|aarch64" | head -n 1)
+
+          if [ -n "$ASSET_URL" ]; then
+              echo "Found valid release URL: $ASSET_URL"
+              # Скачивание файла с обработкой редиректов
+              if curl -s -L -f -o "payload/bin/git_tmp" "$ASSET_URL"; then
+                  echo "Successfully downloaded Git asset."
+                  
+                  # Проверка формата скачанного файла (распаковка архива или переименование бинарника)
+                  if file payload/bin/git_tmp | grep -q "gzip"; then
+                      echo "Downloaded file is a compressed archive. Extracting..."
+                      tar -xzf payload/bin/git_tmp -C payload/bin/
+                      find payload/bin/ -type f -name "git" -exec mv {} payload/bin/git_bin \;
+                      mv payload/bin/git_bin payload/bin/git
+                      rm -f payload/bin/git_tmp
+                  else
+                      echo "Downloaded file is a direct binary."
+                      mv payload/bin/git_tmp payload/bin/git
                   fi
-                  echo "Failed to download from $url, trying next mirror..."
-              done
-              echo "Error: All mirrors failed for $output_path"
-              return 1
-          }
-
-          # Зеркала для скачивания статического Git под архитектуру Android ARM64 (arm64-v8a)
-          git_mirrors=(
-              "https://github.com/EXALAB/git-static/raw/master/bin/arm64-v8a/git"
-              "https://raw.githubusercontent.com/EXALAB/git-static/master/bin/arm64-v8a/git"
-          )
-
-          # Скачивание и верификация исполняемого файла Git
-          if download_file "payload/bin/git_tmp" "${git_mirrors[@]}"; then
-              if file payload/bin/git_tmp | grep -q "gzip"; then
-                  echo "Downloaded file is a compressed archive. Extracting..."
-                  tar -xzf payload/bin/git_tmp -C payload/bin/
-                  find payload/bin/ -type f -name "git" -exec mv {} payload/bin/git_bin \;
-                  mv payload/bin/git_bin payload/bin/git
-                  rm -f payload/bin/git_tmp
               else
-                  echo "Downloaded file is a direct binary."
-                  mv payload/bin/git_tmp payload/bin/git
+                  echo "Error: Failed to download Git from $ASSET_URL"
+                  exit 1
               fi
           else
-              echo "Critical: Git binary download failed."
+              echo "Error: Could not retrieve ARM64 asset URL from EXALAB/git-static releases via API."
               exit 1
           fi
 
