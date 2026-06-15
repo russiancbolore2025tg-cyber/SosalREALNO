@@ -20,7 +20,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip unzip curl clang file
+          sudo apt-get install -y zip unzip curl clang
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -28,42 +28,22 @@ jobs:
         with:
           ndk-version: r25c
 
-      - name: Download Static Git for Android ARM64 via GitHub API
+      - name: Download Static Git for Android ARM64
         run: |
           mkdir -p payload/bin
 
-          # Динамический запрос к GitHub API для получения прямой ссылки на ARM64 бинарник
-          echo "Querying GitHub API for EXALAB/git-static releases..."
-          ASSET_URL=$(curl -s https://api.github.com/repos/EXALAB/git-static/releases | grep -oP '"browser_download_url": "\K[^"]*' | grep -E "arm64|aarch64" | head -n 1)
+          # Прямая ссылка на статический бинарный файл Git из репозитория EXALAB/git-static
+          GIT_URL="https://raw.githubusercontent.com/EXALAB/git-static/master/output/arm64/bin/git"
 
-          if [ -n "$ASSET_URL" ]; then
-              echo "Found valid release URL: $ASSET_URL"
-              # Скачивание файла с обработкой редиректов
-              if curl -s -L -f -o "payload/bin/git_tmp" "$ASSET_URL"; then
-                  echo "Successfully downloaded Git asset."
-                  
-                  # Проверка формата скачанного файла (распаковка архива или переименование бинарника)
-                  if file payload/bin/git_tmp | grep -q "gzip"; then
-                      echo "Downloaded file is a compressed archive. Extracting..."
-                      tar -xzf payload/bin/git_tmp -C payload/bin/
-                      find payload/bin/ -type f -name "git" -exec mv {} payload/bin/git_bin \;
-                      mv payload/bin/git_bin payload/bin/git
-                      rm -f payload/bin/git_tmp
-                  else
-                      echo "Downloaded file is a direct binary."
-                      mv payload/bin/git_tmp payload/bin/git
-                  fi
-              else
-                  echo "Error: Failed to download Git from $ASSET_URL"
-                  exit 1
-              fi
+          echo "Downloading Git binary from: $GIT_URL"
+          if curl -s -L -f -o "payload/bin/git" "$GIT_URL"; then
+              echo "Git downloaded successfully."
+              # Выдача прав на исполнение бинарного файла
+              chmod +x payload/bin/git
           else
-              echo "Error: Could not retrieve ARM64 asset URL from EXALAB/git-static releases via API."
+              echo "Critical Error: Failed to download Git from $GIT_URL"
               exit 1
           fi
-
-          # Выдача прав на исполнение бинарного файла Git
-          chmod +x payload/bin/git
 
       - name: Clone Heroku Userbot Source
         run: |
