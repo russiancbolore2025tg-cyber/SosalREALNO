@@ -88,7 +88,7 @@ jobs:
           os.makedirs("payload/site-packages", exist_ok=True)
 
           # Разделение зависимостей на бинарные и чистые Python-пакеты.
-          # TgCrypto-pyроfork заменен на стабильный tgcrypto из индекса Chaquopy.
+          # TgCrypto-pyроfork заменен на стабильный tgcrypto из индекса Chaquopy 13.1.
           binary_reqs = [
               "pydantic-core>=2.10.0",
               "orjson",
@@ -126,8 +126,8 @@ jobs:
           with open("reqs_pure.txt", "w") as f:
               f.write("\n".join(pure_reqs))
 
-          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64 из репозитория Chaquopy
-          print("Downloading compiled binary wheels for Android ARM64 from Chaquopy...")
+          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64 из репозитория Chaquopy 13.1
+          print("Downloading compiled binary wheels for Android ARM64 from Chaquopy 13.1...")
           subprocess.run([
               "pip", "download",
               "--only-binary=:all:",
@@ -135,7 +135,7 @@ jobs:
               "--implementation", "cp",
               "--python-version", "311",
               "--abi", "cp311",
-              "--index-url", "https://chaquo.com/pypi-7.0/",
+              "--index-url", "https://chaquo.com/pypi-13.1/",
               "-r", "reqs_binary.txt",
               "-d", "wheels_binary"
           ], check=True)
