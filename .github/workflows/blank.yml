@@ -20,7 +20,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip unzip curl clang
+          sudo apt-get install -y zip unzip curl clang file
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -73,52 +73,98 @@ jobs:
               print("main.py successfully patched.")
           '
 
-      - name: Download and Unpack Compiled Python Wheels (Android ARM64 / cp311)
+      - name: Download and Extract All Python Dependencies (Pure & Binary)
         run: |
-          mkdir -p wheels
-          mkdir -p payload/site-packages
-          
-          cat << 'EOF' > temp_requirements.txt
-          heroku-tl-new==2.0.0
-          pyaes
-          aiofile==3.8.1
-          aiofiles==24.1.0
-          aiogram==3.26.0
-          pydantic-core>=2.27.2 
-          pydantic>=2.10.4
-          gitpython==3.1.2
-          deep-translator
-          meval==2.5
-          aiohttp_jinja2==1.5
-          aiohttp==3.11.18
-          Jinja2==3.0.3
-          requests==2.27.1
-          certifi==2024.8.30
-          grapheme==0.6.0
-          emoji==2.1.0
-          werkzeug==2.2.2
-          psutil==6.0.0
-          TgCrypto-pyrofork
-          rsa==4.9
-          ruamel.yaml==0.17.21
-          bs4==0.0.2
-          orjson
-          Pillow
-          EOF
+          python3 -c '
+          import os
+          import subprocess
+          import zipfile
+          import tarfile
+          import glob
 
-          pip download \
-            --only-binary=:all: \
-            --platform android_32_arm64_v8a \
-            --implementation cp \
-            --python-version 311 \
-            --abi cp311 \
-            -r temp_requirements.txt \
-            -d wheels/
+          # Создание необходимых папок
+          os.makedirs("wheels_binary", exist_ok=True)
+          os.makedirs("wheels_pure", exist_ok=True)
+          os.makedirs("payload/site-packages", exist_ok=True)
 
-          for whl in wheels/*.whl; do
-            unzip -q -o "$whl" -d payload/site-packages/
-          done
-          rm -rf wheels temp_requirements.txt
+          # Разделение зависимостей на бинарные и чистые Python-пакеты
+          binary_reqs = [
+              "pydantic-core>=2.27.2",
+              "orjson",
+              "psutil==6.0.0",
+              "Pillow",
+              "TgCrypto-pyrofork"
+          ]
+
+          pure_reqs = [
+              "heroku-tl-new==2.0.0",
+              "pyaes",
+              "aiofile==3.8.1",
+              "aiofiles==24.1.0",
+              "aiogram==3.26.0",
+              "pydantic>=2.10.4",
+              "gitpython==3.1.2",
+              "deep-translator",
+              "meval==2.5",
+              "aiohttp_jinja2==1.5",
+              "aiohttp==3.11.18",
+              "Jinja2==3.0.3",
+              "requests==2.27.1",
+              "certifi==2024.8.30",
+              "grapheme==0.6.0",
+              "emoji==2.1.0",
+              "werkzeug==2.2.2",
+              "rsa==4.9",
+              "ruamel.yaml==0.17.21",
+              "bs4==0.0.2"
+          ]
+
+          with open("reqs_binary.txt", "w") as f:
+              f.write("\n".join(binary_reqs))
+
+          with open("reqs_pure.txt", "w") as f:
+              f.write("\n".join(pure_reqs))
+
+          # 1. Загрузка бинарных пакетов, скомпилированных под Android ARM64
+          print("Downloading compiled binary wheels for Android ARM64...")
+          subprocess.run([
+              "pip", "download",
+              "--only-binary=:all:",
+              "--platform", "android_32_arm64_v8a",
+              "--implementation", "cp",
+              "--python-version", "311",
+              "--abi", "cp311",
+              "-r", "reqs_binary.txt",
+              "-d", "wheels_binary"
+          ], check=True)
+
+          # 2. Загрузка чистых (платформонезависимых) Python-пакетов
+          print("Downloading pure Python wheels/tarballs...")
+          subprocess.run([
+              "pip", "download",
+              "-r", "reqs_pure.txt",
+              "-d", "wheels_pure"
+          ], check=True)
+
+          # Функция распаковки скачанных архивов в payload/site-packages
+          def extract_archive(filepath, dest):
+              if filepath.endswith(".whl") or filepath.endswith(".zip"):
+                  with zipfile.ZipFile(filepath, "r") as z:
+                      z.extractall(dest)
+              elif filepath.endswith(".tar.gz") or filepath.endswith(".tgz"):
+                  with tarfile.open(filepath, "r:gz") as t:
+                      t.extractall(dest)
+
+          print("Extracting compiled binary packages...")
+          for f in glob.glob("wheels_binary/*"):
+              extract_archive(f, "payload/site-packages")
+
+          print("Extracting pure Python packages...")
+          for f in glob.glob("wheels_pure/*"):
+              extract_archive(f, "payload/site-packages")
+
+          print("Dependencies preparation complete.")
+          '
 
       - name: Compress Payload into ZIP
         run: |
