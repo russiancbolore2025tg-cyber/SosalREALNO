@@ -54,28 +54,37 @@ jobs:
               return 1
           }
 
-          # Проверенные зеркала для Git (Android ARM64)
+          # Список высоконадежных зеркал для Git (Android ARM64)
           git_mirrors=(
+              "https://github.com/romkatv/git-binaries/releases/download/v2.24.1.20191211/git-2.24.1.20191211-linux-aarch64.tar.gz"
               "https://github.com/bionicveka/git-static-android/releases/download/v2.40.1/git-2.40.1-arm64.tar.gz"
               "https://raw.githubusercontent.com/fabi9432/git-static-android/master/bin/git"
           )
 
-          # Проверенные зеркала для SSH (Android ARM64)
+          # Список высоконадежных зеркал для SSH (Android ARM64)
           ssh_mirrors=(
               "https://raw.githubusercontent.com/vst93/static-binaries-android/master/arm64-v8a/ssh"
               "https://raw.githubusercontent.com/vst93/static-binaries-android/main/arm64-v8a/ssh"
               "https://github.com/SirenR/static-binaries/raw/main/ssh-arm64"
+              "https://raw.githubusercontent.com/andrew-d/static-binaries/master/binaries/linux/arm64/ssh"
           )
 
           # Скачивание и извлечение Git
           if download_file "payload/bin/git_tmp" "${git_mirrors[@]}"; then
               if file payload/bin/git_tmp | grep -q "gzip"; then
-                  echo "Downloaded Git is an archive. Extracting..."
+                  echo "Downloaded Git is a compressed archive. Extracting..."
                   tar -xzf payload/bin/git_tmp -C payload/bin/
-                  find payload/bin/ -type f -name "git-*" -exec mv {} payload/bin/git \;
+                  
+                  # Поиск исполняемого файла git внутри распакованной структуры
+                  find payload/bin/ -type f -name "git" -exec mv {} payload/bin/git_bin \;
+                  if [ ! -f "payload/bin/git_bin" ]; then
+                      find payload/bin/ -type f -name "git-*" -exec mv {} payload/bin/git_bin \;
+                  fi
+                  
+                  mv payload/bin/git_bin payload/bin/git
                   rm -f payload/bin/git_tmp
               else
-                  echo "Downloaded Git is a direct binary."
+                  echo "Downloaded Git is a direct raw binary."
                   mv payload/bin/git_tmp payload/bin/git
               fi
           else
@@ -91,6 +100,7 @@ jobs:
               exit 1
           fi
 
+          # Установка прав на запуск
           chmod +x payload/bin/git
           chmod +x payload/bin/ssh
 
