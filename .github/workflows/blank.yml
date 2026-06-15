@@ -20,7 +20,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip unzip wget clang file
+          sudo apt-get install -y zip unzip curl clang file
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -32,7 +32,7 @@ jobs:
         run: |
           mkdir -p payload/bin
 
-          # Функция для скачивания файла с автоматическим перебором зеркал
+          # Функция скачивания с перебором зеркал через curl (без уязвимого --spider HEAD)
           download_file() {
               local output_path="$1"
               shift
@@ -40,8 +40,10 @@ jobs:
               
               for url in "${urls[@]}"; do
                   echo "Attempting to download from: $url"
-                  if wget -q --spider "$url"; then
-                      if wget -q -O "$output_path" "$url"; then
+                  # -f заставляет curl вернуть ошибку при 404/500
+                  # -L принудительно следует за редиректами на AWS S3
+                  if curl -s -L -f -o "$output_path" "$url"; then
+                      if [ -s "$output_path" ]; then
                           echo "Successfully downloaded to $output_path"
                           return 0
                       fi
@@ -52,28 +54,28 @@ jobs:
               return 1
           }
 
-          # Список зеркал для Git (компилированные под Android ARM64)
+          # Проверенные зеркала для Git (Android ARM64)
           git_mirrors=(
               "https://github.com/bionicveka/git-static-android/releases/download/v2.40.1/git-2.40.1-arm64.tar.gz"
               "https://raw.githubusercontent.com/fabi9432/git-static-android/master/bin/git"
           )
 
-          # Список зеркал для SSH (компилированные под Android ARM64)
+          # Проверенные зеркала для SSH (Android ARM64)
           ssh_mirrors=(
-              "https://raw.githubusercontent.com/vst93/static-binaries-android/main/arm64-v8a/ssh"
               "https://raw.githubusercontent.com/vst93/static-binaries-android/master/arm64-v8a/ssh"
+              "https://raw.githubusercontent.com/vst93/static-binaries-android/main/arm64-v8a/ssh"
               "https://github.com/SirenR/static-binaries/raw/main/ssh-arm64"
           )
 
-          # Скачивание и обработка Git
+          # Скачивание и извлечение Git
           if download_file "payload/bin/git_tmp" "${git_mirrors[@]}"; then
               if file payload/bin/git_tmp | grep -q "gzip"; then
-                  echo "Downloaded Git is a compressed archive. Extracting..."
+                  echo "Downloaded Git is an archive. Extracting..."
                   tar -xzf payload/bin/git_tmp -C payload/bin/
                   find payload/bin/ -type f -name "git-*" -exec mv {} payload/bin/git \;
                   rm -f payload/bin/git_tmp
               else
-                  echo "Downloaded Git is a raw executable binary."
+                  echo "Downloaded Git is a direct binary."
                   mv payload/bin/git_tmp payload/bin/git
               fi
           else
@@ -89,7 +91,6 @@ jobs:
               exit 1
           fi
 
-          # Назначение прав на исполнение
           chmod +x payload/bin/git
           chmod +x payload/bin/ssh
 
@@ -102,6 +103,7 @@ jobs:
 
       - name: Direct Patching of Telegram Session Parameters (Anti-Ban)
         run: |
+          # Внесение изменений в исходный код Heroku до упаковки в SO
           python3 -c '
           import os
           
