@@ -1,0 +1,166 @@
+name: Build Unified Heroku SO
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip wget clang
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r25c
+
+      - name: Download Static Git and SSH Binaries for Android ARM64
+        run: |
+          mkdir -p payload/bin
+          # Загрузка стабильных статических бинарников git и ssh для архитектуры aarch64
+          wget -q -O payload/bin/git https://github.com/joshua-noakes/static-binaries/raw/main/git-arm64
+          wget -q -O payload/bin/ssh https://github.com/joshua-noakes/static-binaries/raw/main/ssh-arm64
+          chmod +x payload/bin/git
+          chmod +x payload/bin/ssh
+
+      - name: Clone Heroku Userbot Source
+        run: |
+          git clone --depth 1 https://github.com/coddrago/Heroku temp_heroku
+          mkdir -p payload/heroku_app
+          mv temp_heroku/* payload/heroku_app/
+          rm -rf temp_heroku
+
+      - name: Download and Unpack Compiled Python Wheels (Android ARM64 / cp311)
+        run: |
+          mkdir -p wheels
+          mkdir -p payload/site-packages
+          
+          # Запись всех зависимостей во временный файл
+          cat << 'EOF' > temp_requirements.txt
+          heroku-tl-new==2.0.0
+          pyaes
+          aiofile==3.8.1
+          aiofiles==24.1.0
+          aiogram==3.26.0
+          pydantic-core>=2.27.2 
+          pydantic>=2.10.4
+          gitpython==3.1.2
+          deep-translator
+          meval==2.5
+          aiohttp_jinja2==1.5
+          aiohttp==3.11.18
+          Jinja2==3.0.3
+          requests==2.27.1
+          certifi==2024.8.30
+          grapheme==0.6.0
+          emoji==2.1.0
+          werkzeug==2.2.2
+          psutil==6.0.0
+          TgCrypto-pyrofork
+          rsa==4.9
+          ruamel.yaml==0.17.21
+          bs4==0.0.2
+          orjson
+          Pillow
+          EOF
+
+          # Скачивание предкомпилированных под Android ARM64 Python 3.11 whl-пакетов
+          pip download \
+            --only-binary=:all: \
+            --platform android_32_arm64_v8a \
+            --implementation cp \
+            --python-version 311 \
+            --abi cp311 \
+            -r temp_requirements.txt \
+            -d wheels/
+
+          # Распаковка всех .whl пакетов прямо в site-packages будущего бандла
+          for whl in wheels/*.whl; do
+            unzip -q -o "$whl" -d payload/site-packages/
+          done
+          rm -rf wheels temp_requirements.txt
+
+      - name: Compress Payload into ZIP
+        run: |
+          cd payload
+          zip -r ../payload.zip .
+          cd ..
+          rm -rf payload
+
+      - name: Generate C Payload Header
+        run: |
+          # Конвертация ZIP-архива в массив байтов на C с помощью Python для кроссплатформенности
+          python3 -c '
+          import os
+          with open("payload.zip", "rb") as f:
+              data = f.read()
+          
+          out = []
+          out.append("unsigned char payload_zip[] = {")
+          for i, byte in enumerate(data):
+              if i % 12 == 0:
+                  out.append("\n    ")
+              out.append(f"0x{byte:02x}, ")
+          out.append("\n};\n")
+          out.append(f"unsigned int payload_zip_len = {len(data)};\n")
+          
+          with open("payload.h", "w") as out_f:
+              out_f.write("".join(out))
+          '
+
+      - name: Create Loader C Source
+        run: |
+          cat << 'EOF' > loader.c
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <string.h>
+          #include "payload.h"
+
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+
+          void extract_payload(const char* dest_dir) {
+              char out_path[1024];
+              snprintf(out_path, sizeof(out_path), "%s/payload.zip", dest_dir);
+              
+              FILE* f = fopen(out_path, "wb");
+              if (f) {
+                  fwrite(payload_zip, 1, payload_zip_len, f);
+                  fclose(f);
+              }
+          }
+
+          #ifdef __cplusplus
+          }
+          #endif
+          EOF
+
+      - name: Compile Unified Shared Library using NDK Clang
+        run: |
+          # Использование тулчейна NDK для сборки под архитектуру Android aarch64 (API 32)
+          $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android32-clang \
+            -shared \
+            -O3 \
+            -o libheroku_core.so \
+            loader.c
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libheroku_core
+          path: libheroku_core.so
